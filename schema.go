@@ -128,12 +128,17 @@ func (g *generator) paramRef(t reflect.Type) (*openapi3.SchemaRef, error) {
 	return g.inline.NewSchemaRefForValue(reflect.New(deref(t)).Interface(), nil)
 }
 
-// customizeSchema fills in `required` for every struct schema, and notes the
-// type behind each component name.
+// customizeSchema fills in what openapi3gen leaves out: `required` on every
+// struct, and `enum` wherever a type or tag declares one. It also notes the type
+// behind each component name.
 //
 // openapi3gen parses `,omitempty` but never acts on it and never emits
 // `required` at all, so without this hook every field would look optional.
-func (g *generator) customizeSchema(_ string, t reflect.Type, _ reflect.StructTag, schema *openapi3.Schema) error {
+func (g *generator) customizeSchema(_ string, t reflect.Type, tag reflect.StructTag, schema *openapi3.Schema) error {
+	if err := applyEnum(t, tag, schema); err != nil {
+		return err
+	}
+
 	if t.Kind() != reflect.Struct {
 		return nil
 	}
@@ -246,6 +251,16 @@ func (g *generator) parameters(t reflect.Type) (openapi3.Parameters, error) {
 			return
 		}
 		param.Schema = schema
+
+		// A type's Values method is picked up by the customizer during
+		// generation, but an `enum` tag is not: parameters are generated from
+		// the field's type alone.
+		if raw, ok := f.Tag.Lookup("enum"); ok {
+			if err = applyEnumTag(schema.Value, f.Type, raw); err != nil {
+				err = fmt.Errorf("parameter %q: %w", param.Name, err)
+				return
+			}
+		}
 
 		params = append(params, &openapi3.ParameterRef{Value: param})
 	})

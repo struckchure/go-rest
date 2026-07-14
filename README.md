@@ -113,6 +113,44 @@ type LoginRequest struct {
 The same rule drives parameters. Path parameters are always required, whatever
 the field says — the spec allows nothing else.
 
+## Enums
+
+Go keeps no record of a named type's constants at runtime, so an enum has to
+declare itself. The way to do it is a `Values` method, which travels with the
+type and describes every field of that type, everywhere it appears:
+
+```go
+type Status string
+
+const (
+	StatusActive   Status = "active"
+	StatusArchived Status = "archived"
+)
+
+func (Status) Values() []string {
+	return []string{string(StatusActive), string(StatusArchived)}
+}
+```
+
+The method can return a slice of anything — `[]string`, `[]int`, `[]Status`,
+`[]any` — and can hang off the value or the pointer. Integer enums stay numeric
+in the document rather than turning into strings.
+
+For a one-off on a plain type, an `enum` tag does the job without a named type:
+
+```go
+type SearchRequest struct {
+	Status Status   `json:"status"`                       // from the type
+	Any    []Status `json:"any"`                          // values land on items
+	Colour string   `json:"colour" enum:"red,green,blue"` // from a tag
+	Sort   string   `query:"sort" enum:"asc,desc"`        // works on parameters too
+}
+```
+
+Both forms follow pointers, and put the values on `items` for a slice rather than
+on the array. An `enum` value that does not fit its field's type — `enum:"one"`
+on an `int` — is an error, not a document that lies.
+
 ## Security
 
 Security is opt-in per route. A route that asks for nothing is public.

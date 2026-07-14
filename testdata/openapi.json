@@ -48,6 +48,56 @@
         ],
         "type": "object"
       },
+      "SearchRequest": {
+        "properties": {
+          "any": {
+            "items": {
+              "enum": [
+                "active",
+                "archived"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "colour": {
+            "enum": [
+              "red",
+              "green",
+              "blue"
+            ],
+            "type": "string"
+          },
+          "priority": {
+            "enum": [
+              1,
+              2,
+              3
+            ],
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "archived"
+            ],
+            "type": "string"
+          },
+          "was": {
+            "enum": [
+              "active",
+              "archived"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "priority",
+          "colour"
+        ],
+        "type": "object"
+      },
       "User": {
         "properties": {
           "email": {
@@ -132,6 +182,75 @@
           }
         },
         "summary": "Authenticate a user"
+      }
+    },
+    "/api/user/search/": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sort",
+            "required": true,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kinds",
+            "schema": {
+              "items": {
+                "enum": [
+                  "a",
+                  "b"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "required": true,
+            "schema": {
+              "enum": [
+                "active",
+                "archived"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/User"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        }
       }
     },
     "/api/user/{id}": {

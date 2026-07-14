@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,35 @@ type User struct {
 	Email string `json:"email"`
 }
 
+// Status declares its own values, so every field of this type is an enum.
+type Status string
+
+const (
+	StatusActive   Status = "active"
+	StatusArchived Status = "archived"
+)
+
+func (Status) Values() []string {
+	return []string{string(StatusActive), string(StatusArchived)}
+}
+
+// Priority is an integer enum with a pointer receiver, returning a slice of
+// itself rather than of a primitive.
+type Priority int
+
+func (*Priority) Values() []Priority { return []Priority{1, 2, 3} }
+
+type SearchRequest struct {
+	Status   Status   `json:"status"`                       // enum from the type
+	Was      *Status  `json:"was"`                          // pointer to an enum
+	Any      []Status `json:"any"`                          // slice of an enum
+	Priority Priority `json:"priority"`                     // integer enum
+	Colour   string   `json:"colour" enum:"red,green,blue"` // enum from a tag
+	Sort     string   `query:"sort" enum:"asc,desc"`        // enum on a parameter
+	Kinds    []string `query:"kinds" enum:"a,b"`            // enum on an array parameter
+	Mode     Status   `query:"mode"`                        // typed enum on a parameter
+}
+
 // fixture builds the document every test works from.
 func fixture() *rest.Rest {
 	api := rest.New(
@@ -74,6 +104,10 @@ func fixture() *rest.Rest {
 	// Overrides the default.
 	api.Get("/api/user/").
 		RequireSecurity("apiKey").
+		HasResponseModel(http.StatusOK, rest.ModelOf[[]User]())
+
+	api.Post("/api/user/search/").
+		HasRequestModel(rest.ModelOf[SearchRequest]()).
 		HasResponseModel(http.StatusOK, rest.ModelOf[[]User]())
 
 	return api
@@ -233,6 +267,84 @@ func TestTimeIsInlined(t *testing.T) {
 	}
 	if _, ok := doc.Components.Schemas["Time"]; ok {
 		t.Error("time.Time leaked into components.schemas")
+	}
+}
+
+// Go records nothing about a named type's constants, so an enum declares itself
+// with a Values method or an `enum` tag.
+func TestEnums(t *testing.T) {
+	doc := mustDoc(t, fixture())
+
+	properties := doc.Components.Schemas["SearchRequest"].Value.Properties
+
+	statuses := []any{"active", "archived"}
+
+	for _, tc := range []struct {
+		field string
+		want  []any
+	}{
+		{"status", statuses},                      // Values() on the type
+		{"was", statuses},                         // *Status: the pointer is followed
+		{"colour", []any{"red", "green", "blue"}}, // `enum` tag
+	} {
+		if got := properties[tc.field].Value.Enum; !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%q enum = %v, want %v", tc.field, got, tc.want)
+		}
+	}
+
+	// A slice of an enum puts the values on items, not on the array.
+	if got := properties["any"].Value.Enum; got != nil {
+		t.Errorf("the array itself should carry no enum, got %v", got)
+	}
+	if got := properties["any"].Value.Items.Value.Enum; !reflect.DeepEqual(got, statuses) {
+		t.Errorf("items enum = %v, want %v", got, statuses)
+	}
+
+	// An integer enum stays numeric rather than becoming strings.
+	if got := properties["priority"].Value.Enum; !reflect.DeepEqual(got, []any{int64(1), int64(2), int64(3)}) {
+		t.Errorf("priority enum = %v, want [1 2 3]", got)
+	}
+}
+
+func TestEnumsOnParameters(t *testing.T) {
+	doc := mustDoc(t, fixture())
+
+	params := map[string]*openapi3.Parameter{}
+	for _, ref := range doc.Paths.Find("/api/user/search/").Post.Parameters {
+		params[ref.Value.Name] = ref.Value
+	}
+
+	if got, want := params["sort"].Schema.Value.Enum, []any{"asc", "desc"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("sort enum = %v, want %v", got, want)
+	}
+	if got, want := params["mode"].Schema.Value.Enum, []any{"active", "archived"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("mode enum = %v, want %v (from the type)", got, want)
+	}
+
+	// As in a body, an array parameter carries its enum on items.
+	kinds := params["kinds"].Schema.Value
+	if kinds.Enum != nil {
+		t.Errorf("the array itself should carry no enum, got %v", kinds.Enum)
+	}
+	if got, want := kinds.Items.Value.Enum, []any{"a", "b"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("kinds items enum = %v, want %v", got, want)
+	}
+}
+
+func TestBadEnumTagIsAnError(t *testing.T) {
+	type Bad struct {
+		Count int `json:"count" enum:"one,two"` // not integers
+	}
+
+	api := rest.New()
+	api.Post("/x").HasRequestModel(rest.ModelOf[Bad]())
+
+	_, err := api.OpenAPI()
+	if err == nil {
+		t.Fatal("expected an error for an enum value that does not fit the field's type")
+	}
+	if !strings.Contains(err.Error(), "one") {
+		t.Errorf("error should name the offending value, got: %v", err)
 	}
 }
 
